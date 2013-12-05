@@ -1453,7 +1453,7 @@ public:
     }
 protected:
     Singleton() {}
-    ~Singleton() {}
+    ~Singleton() { if (instance_) delete instance_; }
 private:
     static T* volatile instance_;
     static Mutex mutex_;
