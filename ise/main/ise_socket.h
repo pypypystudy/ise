@@ -352,7 +352,7 @@ protected:
     void setType(int value);
     void setProtocol(int value);
 
-    void bind(WORD port);
+    void bind(const char* str_addr, WORD port);
 
 private:
     void doSetBlockMode(SOCKET handle, bool value);
@@ -419,6 +419,9 @@ public:
     WORD getLocalPort() const { return localPort_; }
     void setLocalPort(WORD value);
 
+    std::string getLocalAddr() const { return localAddr_; }
+    void setLocalAddr(const std::string& straddr) { localAddr_ = straddr; }
+
     int getListenerThreadCount() const;
     void setListenerThreadCount(int value);
 
@@ -432,6 +435,7 @@ private:
     void dataReceived(void *packetBuffer, int packetSize, const InetAddress& peerAddr);
 
 private:
+    std::string localAddr_;
     WORD localPort_;
     UdpListenerThreadPool *listenerThreadPool_;
     UdpSvrRecvDataCallback onRecvData_;
@@ -558,6 +562,9 @@ public:
     WORD getLocalPort() const { return localPort_; }
     void setLocalPort(WORD value);
 
+    std::string getLocalAddr() const { return localAddr_; }
+    void setLocalAddr(const std::string& straddr) { localAddr_ = straddr; }
+
     const TcpSocket& getSocket() const { return socket_; }
 
     void setCreateConnCallback(const TcpSvrCreateConnCallback& callback);
@@ -573,6 +580,7 @@ protected:
 private:
     TcpSocket socket_;
     WORD localPort_;
+    std::string localAddr_;
     TcpListenerThread *listenerThread_;
     TcpSvrCreateConnCallback onCreateConn_;
     TcpSvrAcceptConnCallback onAcceptConn_;

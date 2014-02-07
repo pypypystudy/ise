@@ -236,6 +236,13 @@ void IseOptions::setUdpServerPort(int port)
     udpServerPort_ = port;
 }
 
+//------------------------------------------------------------------------
+// 描述：设置UDP服务器的地址
+//------------------------------------------------------------------------
+void IseOptions::setUpdServerAddr(const std::string& addr)
+{
+    udpServerAddr_ = addr;
+}
 //-----------------------------------------------------------------------------
 // 描述: 设置UDP监听线程的数量
 //-----------------------------------------------------------------------------
@@ -352,6 +359,18 @@ void IseOptions::setTcpServerPort(int serverIndex, int port)
 }
 
 //-----------------------------------------------------------------------------
+// 描述: 设置TCP服务地址
+// 参数:
+//   serverIndex - TCP服务器序号 (0-based)
+//   port        - 地址
+//-----------------------------------------------------------------------------
+void IseOptions::setTcpServerAddr(int serverIndex, const std::string& addr)
+{
+    if (serverIndex < 0 || serverIndex >= tcpServerCount_) return;
+
+    tcpServerOpts_[serverIndex].serverAddr = addr;
+}
+
 // 描述: 设置每个TCP服务器中事件循环的个数
 // 参数:
 //   serverIndex    - TCP服务器序号 (0-based)
@@ -423,6 +442,18 @@ int IseOptions::getTcpServerPort(int serverIndex)
 }
 
 //-----------------------------------------------------------------------------
+// 描述: 取得TCP服务地址
+// 参数:
+//   serverIndex - TCP服务器的序号 (0-based)
+//-----------------------------------------------------------------------------
+std::string IseOptions::getTcpServerAddr(int serverIndex)
+{
+    if (serverIndex < 0 || serverIndex >= tcpServerCount_) return "";
+
+    return tcpServerOpts_[serverIndex].serverAddr;
+}
+
+//-----------------------------------------------------------------------------
 // 描述: 取得TCP服务器中事件循环的个数
 // 参数:
 //   serverIndex - TCP服务器的序号 (0-based)
@@ -464,6 +495,7 @@ void IseMainServer::initialize()
     {
         udpServer_ = new MainUdpServer();
         udpServer_->setLocalPort(static_cast<WORD>(iseApp().iseOptions().getUdpServerPort()));
+        udpServer_->setLocalAddr(iseApp().iseOptions().getUdpServerAddr());
         udpServer_->setListenerThreadCount(iseApp().iseOptions().getUdpListenerThreadCount());
         udpServer_->open();
     }
@@ -722,6 +754,20 @@ void IseApplication::finalize()
     }
 }
 
+
+//-----------------------------------------------------------------------------
+// 描述: 创建 IseBusiness 对象
+//-----------------------------------------------------------------------------
+void IseApplication::setIseBusiness(IseBusiness * business)
+{
+    //     if (!iseBusiness_)
+    //         iseBusiness_ = createIseBusinessObject();
+    iseBusiness_ = business;
+
+    if (!iseBusiness_)
+        iseThrowException(SEM_BUSINESS_OBJ_EXPECTED);
+}
+
 //-----------------------------------------------------------------------------
 // 描述: 开始运行应用程序
 //-----------------------------------------------------------------------------
@@ -848,18 +894,6 @@ void IseApplication::deleteMainServer()
 {
     delete mainServer_;
     mainServer_ = NULL;
-}
-
-//-----------------------------------------------------------------------------
-// 描述: 创建 IseBusiness 对象
-//-----------------------------------------------------------------------------
-void IseApplication::createIseBusiness()
-{
-    if (!iseBusiness_)
-        iseBusiness_ = createIseBusinessObject();
-
-    if (!iseBusiness_)
-        iseThrowException(SEM_BUSINESS_OBJ_EXPECTED);
 }
 
 //-----------------------------------------------------------------------------
@@ -1005,7 +1039,7 @@ void IseApplication::initNewOperHandler()
 {
     const int RESERVED_MEM_SIZE = 1024*1024*2;     // 2M
 
-    std::set_new_handler(outOfMemoryHandler);
+    //std::set_new_handler(outOfMemoryHandler);
 
     // 用于内存不足的情况下程序退出
     reservedMemoryForExit = new char[RESERVED_MEM_SIZE];
@@ -1069,6 +1103,8 @@ void IseApplication::doFinalize()
     try { deleteMainServer(); } catch (...) {}
     try { deleteIseBusiness(); } catch (...) {}
     try { networkFinalize(); } catch (...) {}
+
+    delete []reservedMemoryForExit;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

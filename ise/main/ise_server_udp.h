@@ -257,6 +257,7 @@ public:
     void close();
 
     void setLocalPort(WORD value) { udpServer_.setLocalPort(value); }
+    void setLocalAddr(const std::string strAddr) { udpServer_.setLocalAddr(strAddr); }
     void setListenerThreadCount(int value) { udpServer_.setListenerThreadCount(value); }
 
     // 根据负载情况动态调整工作者线程数量

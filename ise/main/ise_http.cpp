@@ -249,6 +249,84 @@ string HttpHeaderStrList::makeLine(const string& name, const string& value) cons
     return name + nameValueSep_ + " " + value;
 }
 
+//------------------------------------------------------------------------
+std::string HttpCookieInfo::getString() const
+{
+    if (name_.empty()) 
+    {
+        return "";
+    }
+
+    std::string str;
+    str = name_ + "=" + value_;
+
+    if (!expire_.empty()) 
+    {
+        str += "; ";
+        str += "expire=" + expire_;
+    }
+
+    if (!path_.empty()) 
+    {
+        str += "; ";
+        str += "path=" + path_;
+    }
+
+    if (!domain_.empty()) 
+    {
+        str += "; ";
+        str += "domain=" + domain_;
+    }
+    return str;
+}
+
+//------------------------------------------------------------------------
+
+bool HttpCookieInfoList::add(const HttpCookieInfo& info)
+{
+    int index = find(info.name_);
+    if (index >= 0) 
+    {
+        cookieInfoList_[index] = info;
+        return true;
+    }
+
+    cookieInfoList_.push_back(info);
+    return true;
+}
+
+int HttpCookieInfoList::find(std::string name) const
+{
+    int index = -1;
+
+    auto itr = cookieInfoList_.begin();
+    for (; itr != cookieInfoList_.end(); ++itr) 
+    {
+        ++ index;
+
+        if (name == itr->name_) 
+        {
+            return index;
+        }
+    }
+    return -1;
+}
+
+bool HttpCookieInfoList::getCookieInfo(std::string name, HttpCookieInfo& info) const
+{
+    auto itr = cookieInfoList_.begin();
+    for (; itr != cookieInfoList_.end(); ++itr) 
+    {
+        if (name == itr->name_) 
+        {
+            info = *itr;
+            return true;
+        }
+    }
+    return false;
+}
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // class HttpEntityHeaderInfo
 
@@ -322,6 +400,20 @@ void HttpEntityHeaderInfo::parseHeaders()
     eTag_ = rawHeaders_.getValue("ETag");
     pragma_ = rawHeaders_.getValue("Pragma");
     transferEncoding_ = rawHeaders_.getValue("Transfer-Encoding");
+
+    //------------------------------------------------------------------------
+    // parse cookie
+    std::string cookie_ = rawHeaders_.getValue("Cookie");
+    StrList lstSeg;
+    ise::splitString(cookie_, ';', lstSeg, true);
+    for (int j=0; j<lstSeg.getCount(); ++j) 
+    {
+        HttpCookieInfo cookieInfo;
+        cookieInfo.name_ = lstSeg.getName(j);
+        cookieInfo.value_ = lstSeg.getValue(j);
+
+        cookieList_.add(cookieInfo);
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -359,6 +451,18 @@ void HttpEntityHeaderInfo::buildHeaders()
 
     if (customHeaders_.getCount() > 0)
         rawHeaders_.addStrings(customHeaders_);
+}
+
+//------------------------------------------------------------------------
+
+void HttpEntityHeaderInfo::setCookieInfo(const std::string& name, const std::string& value, const std::string path, const std::string expire)
+{
+    HttpCookieInfo info;
+    info.name_ = name;
+    info.value_ = value;
+    info.path_ = path;
+    info.expire_ = expire;
+    cookieList_.add(info);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -459,6 +563,41 @@ void HttpRequestHeaderInfo::setRange(INT64 rangeStart, INT64 rangeEnd)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+//
+void HttpRequestBodyInfo::parseString(const std::string& str)
+{
+    ise::splitString(str, '&', infoList_, true);
+}
+
+const std::string HttpRequestBodyInfo::getValue(const std::string& name) const
+{
+    return infoList_.getValue(name.c_str());
+}
+
+const std::string HttpRequestBodyInfo::getValue(int index) const
+{
+    return infoList_.getValue(index);
+}
+
+//-----------------------------------------------------------------------------
+
+const std::string HttpRequestBodyInfo::getName(int index) const
+{
+    return infoList_.getName(index);
+}
+
+//-----------------------------------------------------------------------------
+
+const int HttpRequestBodyInfo::getCount() const
+{
+    return infoList_.getCount();
+}
+
+const std::string HttpRequestBodyInfo::getString(int index) const
+{
+    return infoList_.getString(index);
+}
+
 // class HttpResponseHeaderInfo
 
 void HttpResponseHeaderInfo::init()
@@ -507,6 +646,23 @@ void HttpResponseHeaderInfo::buildHeaders()
 
     if (!acceptRanges_.empty())
         rawHeaders_.setValue("Accept-Ranges", acceptRanges_);
+
+    if (!server_.empty()) 
+        rawHeaders_.setValue("Server", server_);
+
+    if (!location_.empty()) 
+        rawHeaders_.setValue("Location", location_);
+    
+
+    // 添加cookie的识别
+    for (int i=0; i<cookieList_.getCount(); ++i) 
+    {
+        std::string cookie_ = cookieList_.getIndex(i).getString();
+        if (!cookie_.empty()) 
+        {
+            rawHeaders_.add("Set-Cookie: " + cookie_);
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -533,6 +689,18 @@ void HttpRequest::clear()
 {
     HttpRequestHeaderInfo::clear();
     init();
+}
+
+//------------------------------------------------------------------------
+void HttpRequest::parseBody()
+{
+    contentStream_->setPosition(0);
+    std::string str;
+    str.resize(contentStream_->getSize());
+
+    contentStream_->read((char*) str.c_str(), contentStream_->getSize());
+    
+    requestBody_.parseString(str);
 }
 
 //-----------------------------------------------------------------------------
@@ -686,6 +854,13 @@ void HttpResponse::setContentStream(Stream *stream, bool ownsObject)
     ownsContentStream_ = ownsObject;
 }
 
+//------------------------------------------------------------------------
+
+void HttpResponse::redirect(std::string url)
+{
+    this->setLocation(url);
+    this->setStatusCode(302);
+}
 //-----------------------------------------------------------------------------
 
 void HttpResponse::makeResponseHeaderBuffer(Buffer& buffer)
@@ -1377,12 +1552,28 @@ int HttpClient::readStream(Stream& stream, int bytes, int timeout)
 HttpServer::HttpServer()
 {
     // nothing
+    initContentTypeMap();
 }
 
 HttpServer::~HttpServer()
 {
     // nothing
 }
+
+//-----------------------------------------------------------------------------
+void HttpServer::setRootPath(std::string rootPath)
+{
+    root_path_ = rootPath;
+    root_path_ = ise::pathWithoutSlash(root_path_);
+}
+
+//------------------------------------------------------------------------
+const std::string HttpServer::getRootPath() const
+{
+    return root_path_;
+}
+
+//------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
 
@@ -1398,6 +1589,43 @@ void HttpServer::onTcpConnected(const TcpConnectionPtr& connection)
 
     connection->setContext(ConnContextPtr(new ConnContext()));
     connection->recv(LINE_PACKET_SPLITTER, EMPTY_CONTEXT, options_.recvLineTimeout);
+}
+
+//------------------------------------------------------------------------
+
+void HttpServer::sendFile(const std::string& filename, HttpResponse& response)
+{
+    std::string path = root_path_ + filename;
+    if (ise::fileExists(path)) 
+    {
+        response.setStatusCode(200);
+        std::string strext = ise::extractFileExt(path);
+        strext = strext.substr(1);
+        auto itr = contentTypeMap_.find(strext);
+        if (itr != contentTypeMap_.end()) 
+        {
+            response.setContentType(itr->second);
+        }
+        
+        ise::FileStream stream(path, FM_OPEN_READ);
+        ise::Stream* httpstream = response.getContentStream();
+        char szbuff[2048];
+        int nread = 0 ;
+
+        nread = stream.read(szbuff, _countof(szbuff));
+        while (nread > 0) {
+            
+            httpstream->write(szbuff, nread);
+
+            nread = stream.read(szbuff, _countof(szbuff));
+        }
+    }
+    else
+    {
+        std::string msg = "<h2 align=\"center\">Http/1.1.404 NOT FOUND</h2>";
+        response.setStatusCode(404);
+        response.getContentStream()->write(msg.c_str(), (int) msg.size());
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -1466,11 +1694,21 @@ void HttpServer::onTcpRecvComplete(const TcpConnectionPtr& connection, void *pac
                 {
                     connContext->recvReqState = RRS_COMPLETE;
                     connContext->httpRequest.getContentStream()->setPosition(0);
+                    connContext->httpRequest.parseBody();
+                    continue;
                 }
                 else
                 {
                     connContext->reqContentStream.write(packetBuffer, packetSize);
                     connection->recv(ANY_PACKET_SPLITTER, EMPTY_CONTEXT, options_.recvContentTimeout);
+
+                    if (connContext->reqContentStream.getSize() >= contentLength) 
+                    {
+                        connContext->recvReqState = RRS_COMPLETE;
+                        connContext->httpRequest.getContentStream()->setPosition(0);
+                        connContext->httpRequest.parseBody();
+                        continue;
+                    }
                 }
 
                 break;
@@ -1544,6 +1782,148 @@ void HttpServer::onTcpSendComplete(const TcpConnectionPtr& connection, const Con
     default:
         break;
     }
+}
+
+void HttpServer::initContentTypeMap()
+{
+    contentTypeMap_["ez"] = "application/andrew-inset";     
+    contentTypeMap_["hqx"] = "application/mac-binhex40";
+    contentTypeMap_["cpt"] = "application/mac-compactpro";    
+    contentTypeMap_["doc"] = "application/msword";     
+    contentTypeMap_["bin"] = "application/octet-stream";    
+    contentTypeMap_["dms"] = "application/octet-stream";    
+    contentTypeMap_["lha"] = "application/octet-stream";     
+    contentTypeMap_["lzh"] = "application/octet-stream";     
+    contentTypeMap_["exe"] = "application/octet-stream";    
+    contentTypeMap_["class"] = "application/octet-stream";     
+    contentTypeMap_["so"] = "application/octet-stream";     
+    contentTypeMap_["dll"] = "application/octet-stream";     
+    contentTypeMap_["oda"] = "application/oda";    
+    contentTypeMap_["pdf"] = "application/pdf";     
+    contentTypeMap_["ai"] = "application/postscript";     
+    contentTypeMap_["eps"] = "application/postscript";     
+    contentTypeMap_["ps"] = "application/postscript";     
+    contentTypeMap_["smi"] = "application/smil";     
+    contentTypeMap_["smil"] = "application/smil";     
+    contentTypeMap_["mif"] = "application/vnd.mif";     
+    contentTypeMap_["xls"] = "application/vnd.ms-excel";     
+    contentTypeMap_["ppt"] = "application/vnd.ms-powerpoint";     
+    contentTypeMap_["wbxml"] = "application/vnd.wap.wbxml";     
+    contentTypeMap_["wmlc"] = "application/vnd.wap.wmlc";     
+    contentTypeMap_["wmlsc"] = "application/vnd.wap.wmlscriptc";     
+    contentTypeMap_["bcpio"] = "application/x-bcpio";     
+    contentTypeMap_["vcd"] = "application/x-cdlink";     
+    contentTypeMap_["pgn"] = "application/x-chess-pgn";     
+    contentTypeMap_["cpio"] = "application/x-cpio";     
+    contentTypeMap_["csh"] = "application/x-csh";     
+    contentTypeMap_["dcr"] = "application/x-director";     
+    contentTypeMap_["dir"] = "application/x-director";     
+    contentTypeMap_["dxr"] = "application/x-director";     
+    contentTypeMap_["dvi"] = "application/x-dvi";     
+    contentTypeMap_["spl"] = "application/x-futuresplash";     
+    contentTypeMap_["gtar"] = "application/x-gtar";     
+    contentTypeMap_["hdf"] = "application/x-hdf";     
+    contentTypeMap_["js"] = "application/x-javascript";     
+    contentTypeMap_["skp"] = "application/x-koan";     
+    contentTypeMap_["skd"] = "application/x-koan";     
+    contentTypeMap_["skt"] = "application/x-koan";     
+    contentTypeMap_["skm"] = "application/x-koan";     
+    contentTypeMap_["latex"] = "application/x-latex";     
+    contentTypeMap_["nc"] = "application/x-netcdf";     
+    contentTypeMap_["cdf"] = "application/x-netcdf";     
+    contentTypeMap_["sh"] = "application/x-sh";     
+    contentTypeMap_["shar"] = "application/x-shar";     
+    contentTypeMap_["swf"] = "application/x-shockwave-flash";     
+    contentTypeMap_["sit"] = "application/x-stuffit";     
+    contentTypeMap_["sv4cpio"] = "application/x-sv4cpio";     
+    contentTypeMap_["sv4crc"] = "application/x-sv4crc";     
+    contentTypeMap_["tar"] = "application/x-tar";    
+    contentTypeMap_["tcl"] = "application/x-tcl";    
+    contentTypeMap_["tex"] = "application/x-tex";     
+    contentTypeMap_["texinfo"] = "application/x-texinfo";     
+    contentTypeMap_["texi"] = "application/x-texinfo";     
+    contentTypeMap_["t"] = "application/x-troff";     
+    contentTypeMap_["tr"] = "application/x-troff";    
+    contentTypeMap_["roff"] = "application/x-troff";     
+    contentTypeMap_["man"] = "application/x-troff-man";    
+    contentTypeMap_["me"] = "application/x-troff-me";     
+    contentTypeMap_["ms"] = "application/x-troff-ms";     
+    contentTypeMap_["ustar"] = "application/x-ustar";     
+    contentTypeMap_["src"] = "application/x-wais-source";    
+    contentTypeMap_["xhtml"] = "application/xhtml+xml";     
+    contentTypeMap_["xht"] = "application/xhtml+xml";     
+    contentTypeMap_["zip"] = "application/zip";     
+    contentTypeMap_["au"] = "audio/basic";     
+    contentTypeMap_["snd"] = "audio/basic";     
+    contentTypeMap_["mid"] = "audio/midi";    
+    contentTypeMap_["midi"] = "audio/midi";    
+    contentTypeMap_["kar"] = "audio/midi";    
+    contentTypeMap_["mpga"] = "audio/mpeg";     
+    contentTypeMap_["mp2"] = "audio/mpeg";    
+    contentTypeMap_["mp3"] = "audio/mpeg";     
+    contentTypeMap_["aif"] = "audio/x-aiff";     
+    contentTypeMap_["aiff"] = "audio/x-aiff";     
+    contentTypeMap_["aifc"] = "audio/x-aiff";     
+    contentTypeMap_["m3u"] = "audio/x-mpegurl";     
+    contentTypeMap_["ram"] = "audio/x-pn-realaudio";     
+    contentTypeMap_["rm"] = "audio/x-pn-realaudio";     
+    contentTypeMap_["rpm"] = "audio/x-pn-realaudio-plugin";    
+    contentTypeMap_["ra"] = "audio/x-realaudio";    
+    contentTypeMap_["wav"] = "audio/x-wav";     
+    contentTypeMap_["pdb"] = "chemical/x-pdb";     
+    contentTypeMap_["xyz"] = "chemical/x-xyz";     
+    contentTypeMap_["bmp"] = "image/bmp";     
+    contentTypeMap_["gif"] = "image/gif";    
+    contentTypeMap_["ief"] = "image/ief";     
+    contentTypeMap_["jpeg"] = "image/jpeg";    
+    contentTypeMap_["jpg"] = "image/jpeg";     
+    contentTypeMap_["jpe"] = "image/jpeg";    
+    contentTypeMap_["png"] = "image/png";    
+    contentTypeMap_["tiff"] = "image/tiff";     
+    contentTypeMap_["tif"] = "image/tiff";     
+    contentTypeMap_["djvu"] = "image/vnd.djvu";     
+    contentTypeMap_["djv"] = "image/vnd.djvu";    
+    contentTypeMap_["wbmp"] = "image/vnd.wap.wbmp";     
+    contentTypeMap_["ras"] = "image/x-cmu-raster";     
+    contentTypeMap_["pnm"] = "image/x-portable-anymap";     
+    contentTypeMap_["pbm"] = "image/x-portable-bitmap";     
+    contentTypeMap_["pgm"] = "image/x-portable-graymap";     
+    contentTypeMap_["ppm"] = "image/x-portable-pixmap";     
+    contentTypeMap_["rgb"] = "image/x-rgb";    
+    contentTypeMap_["xbm"] = "image/x-xbitmap";    
+    contentTypeMap_["xpm"] = "image/x-xpixmap";    
+    contentTypeMap_["xwd"] = "image/x-xwindowdump";    
+    contentTypeMap_["igs"] = "model/iges";    
+    contentTypeMap_["iges"] = "model/iges";    
+    contentTypeMap_["msh"] = "model/mesh";     
+    contentTypeMap_["mesh"] = "model/mesh";     
+    contentTypeMap_["silo"] = "model/mesh";     
+    contentTypeMap_["wrl"] = "model/vrml";     
+    contentTypeMap_["vrml"] = "model/vrml";    
+    contentTypeMap_["css"] = "text/css";    
+    contentTypeMap_["html"] = "text/html";    
+    contentTypeMap_["htm"] = "text/html";    
+    contentTypeMap_["asc"] = "text/plain";    
+    contentTypeMap_["txt"] = "text/plain";    
+    contentTypeMap_["rtx"] = "text/richtext";    
+    contentTypeMap_["rtf"] = "text/rtf";     
+    contentTypeMap_["sgml"] = "text/sgml";    
+    contentTypeMap_["sgm"] = "text/sgml";     
+    contentTypeMap_["tsv"] = "text/tab-separated-values";    
+    contentTypeMap_["wml"] = "text/vnd.wap.wml";   
+    contentTypeMap_["wmls"] = "text/vnd.wap.wmlscript";     
+    contentTypeMap_["etx"] = "text/x-setext";   
+    contentTypeMap_["xsl"] = "text/xml";    
+    contentTypeMap_["xml"] = "text/xml";    
+    contentTypeMap_["mpeg"] = "video/mpeg";   
+    contentTypeMap_["mpg"] = "video/mpeg";    
+    contentTypeMap_["mpe"] = "video/mpeg";    
+    contentTypeMap_["qt"] = "video/quicktime";    
+    contentTypeMap_["mov"] = "video/quicktime";     
+    contentTypeMap_["mxu"] = "video/vnd.mpegurl";     
+    contentTypeMap_["avi"] = "video/x-msvideo";     
+    contentTypeMap_["movie"] = "video/x-sgi-movie";    
+    contentTypeMap_["ice"] = "x-conference/x-cooltalk";    
 }
 
 ///////////////////////////////////////////////////////////////////////////////

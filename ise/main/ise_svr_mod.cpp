@@ -384,6 +384,7 @@ void IseSvrModBusiness::updateIseOptions()
             TcpServerOptions svrOpt;
             serverModule.getTcpServerOptions(serverIndex, svrOpt);
             options.setTcpServerPort(globalServerIndex, svrOpt.serverPort);
+            options.setTcpServerAddr(globalServerIndex, svrOpt.serverAddr);
             options.setTcpServerEventLoopCount(globalServerIndex, svrOpt.eventLoopCount);
             globalServerIndex++;
         }

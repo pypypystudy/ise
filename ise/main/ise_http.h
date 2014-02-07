@@ -207,6 +207,41 @@ private:
     string nameValueSep_;
 };
 
+
+///////////////////////////////////////////////////////////////////////////////
+// struct HttpCookieInfo
+struct HttpCookieInfo
+{
+    HttpCookieInfo() : secure_(false) {}
+
+    std::string getString() const;
+
+    std::string name_;
+    std::string value_;
+    std::string expire_;
+    std::string path_;
+    std::string domain_;
+    bool secure_;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// class HttpCookieInfoList
+class HttpCookieInfoList
+{
+public:
+    HttpCookieInfoList() {}
+    virtual ~HttpCookieInfoList() {}
+
+    bool add(const HttpCookieInfo& info);
+    int  find(std::string name) const;
+    bool getCookieInfo(std::string name, HttpCookieInfo& info) const;
+    const HttpCookieInfo& getIndex(int index) { return cookieInfoList_[index]; }
+    int getCount() const { return (int) cookieInfoList_.size(); }
+
+protected:
+    std::vector<HttpCookieInfo> cookieInfoList_;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // class HttpEntityHeaderInfo
 
@@ -226,6 +261,7 @@ public:
 
     HttpHeaderStrList& getRawHeaders() { return rawHeaders_; }
     HttpHeaderStrList& getCustomHeaders() { return customHeaders_; }
+    const HttpCookieInfoList& getCookieList() const { return cookieList_; }
 
     const string& getCacheControl() const { return cacheControl_; }
     const string& getConnection() const { return connection_; }
@@ -246,6 +282,9 @@ public:
     const string& getTransferEncoding() const { return transferEncoding_; }
 
     void setCustomHeaders(const HttpHeaderStrList& val) { customHeaders_ = val; }
+    void setCookieInfo(const HttpCookieInfo& val) { cookieList_.add(val); }
+    void setCookieInfo(const std::string& name, const std::string& value, const std::string path, const std::string expire);
+    void setCookieList(const HttpCookieInfoList& val) { cookieList_ = val; }
     void setCacheControl(const string& value) { cacheControl_ = value; }
     void setConnection(const string& value) { connection_ = value; }
     void setConnection(bool keepAlive) { connection_ = (keepAlive? "keep-alive" : "close"); }
@@ -271,6 +310,7 @@ protected:
 protected:
     HttpHeaderStrList rawHeaders_;
     HttpHeaderStrList customHeaders_;
+    HttpCookieInfoList cookieList_;
     string cacheControl_;
     string connection_;
     string contentDisposition_;
@@ -338,6 +378,27 @@ protected:
     string range_;
 };
 
+
+
+///////////////////////////////////////////////////////////////////////////////
+// class HttpRequestBodyInfo
+
+class HttpRequestBodyInfo
+{
+public:
+    void parseString(const std::string& str);
+    const std::string getValue(const std::string& name) const;
+    const std::string getValue(int index) const;
+    const std::string getName(int index) const;
+    const int getCount() const;
+
+    const std::string getString(int index) const; 
+    
+protected:
+    StrList infoList_;
+};
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // class HttpResponseHeaderInfo
 
@@ -376,11 +437,13 @@ public:
     HttpRequest();
 
     virtual void clear();
+    void parseBody();
 
     HTTP_PROTO_VER getProtocolVersion() const { return protocolVersion_; }
     const string& getUrl() const { return url_; }
     const string& getMethod() const { return method_; }
     Stream* getContentStream() const { return contentStream_; }
+    const HttpRequestBodyInfo& getRequestBodyInfo() const { return requestBody_; }
 
     void setProtocolVersion(HTTP_PROTO_VER value) { protocolVersion_ = value; }
     void setUrl(const string& value) { url_ = value; }
@@ -401,6 +464,7 @@ protected:
     string url_;
     string method_;
     Stream *contentStream_;
+    HttpRequestBodyInfo requestBody_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -424,6 +488,8 @@ public:
     void setStatusCode(int statusCode);
     void setContentStream(Stream *stream, bool ownsObject = false);
 
+    void redirect(std::string url);
+    
     void makeResponseHeaderBuffer(Buffer& buffer);
 
 protected:
@@ -573,6 +639,11 @@ public:
     void setHttpSessionCallback(const HttpSessionCallback& callback) { onHttpSession_ = callback; }
     HttpServerOptions& options() { return options_; }
     int getConnCount() { return static_cast<int>(connCount_.get()); }
+    void setRootPath(std::string rootPath);
+    const std::string getRootPath() const;
+
+    /***/
+    void sendFile(const std::string& filename, HttpResponse& response);
 
 public:  /* interface TcpCallbacks */
     virtual void onTcpConnected(const TcpConnectionPtr& connection);
@@ -580,6 +651,9 @@ public:  /* interface TcpCallbacks */
     virtual void onTcpRecvComplete(const TcpConnectionPtr& connection, void *packetBuffer,
         int packetSize, const Context& context);
     virtual void onTcpSendComplete(const TcpConnectionPtr& connection, const Context& context);
+
+    /***/
+    void initContentTypeMap();
 
 private:
     enum RecvReqState
@@ -622,6 +696,9 @@ private:
     HttpServerOptions options_;
     AtomicInt connCount_;
     HttpSessionCallback onHttpSession_;
+
+    std::string root_path_;                                     // webµÄ¸ùÂ·¾¶
+    std::map<std::string, std::string>  contentTypeMap_;        // 
 };
 
 ///////////////////////////////////////////////////////////////////////////////

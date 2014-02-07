@@ -1061,7 +1061,7 @@ void TcpConnector::checkAsyncConnectState(const FdList& fds,
 {
     const int WAIT_TIME = 1;  // ms
 
-    fd_set rset, wset;
+        fd_set rset, wset, eset;
     struct timeval tv;
 
     connectedFds.clear();
@@ -1072,6 +1072,7 @@ void TcpConnector::checkAsyncConnectState(const FdList& fds,
     for (int i = 0; i < (int)fds.size(); ++i)
         FD_SET(fds[i], &rset);
     wset = rset;
+        eset = rset;
 
     // find max fd
     SOCKET maxFd = 0;
@@ -1084,14 +1085,14 @@ void TcpConnector::checkAsyncConnectState(const FdList& fds,
     tv.tv_sec = 0;
     tv.tv_usec = WAIT_TIME * 1000;
 
-    int r = select(maxFd + 1, &rset, &wset, NULL, &tv);
+        int r = select(maxFd + 1, &rset, &wset, &eset, &tv);
     if (r > 0)
     {
         for (int i = 0; i < (int)fds.size(); ++i)
         {
             int state = ACS_CONNECTING;
             SOCKET fd = fds[i];
-            if (FD_ISSET(fd, &rset) || FD_ISSET(fd, &wset))
+                if (FD_ISSET(fd, &rset) || FD_ISSET(fd, &wset) || FD_ISSET(fd, &eset))
             {
                 socklen_t errLen = sizeof(int);
                 int errorCode = 0;
@@ -1313,6 +1314,10 @@ void WinTcpConnection::onIocpCallback(const TcpConnectionPtr& thisObj, const Ioc
 void WinTcpConnection::onSendCallback(const IocpTaskData& taskData)
 {
     ISE_ASSERT(taskData.getErrorCode() == 0);
+        if (this->isErrorOccurred_ || eventLoop_ == NULL) 
+        {
+            return;
+        }
 
     if (taskData.getBytesTrans() < taskData.getDataSize())
     {
@@ -1580,6 +1585,7 @@ IocpObject::~IocpObject()
 bool IocpObject::associateHandle(SOCKET socketHandle)
 {
     HANDLE h = ::CreateIoCompletionPort((HANDLE)socketHandle, iocpHandle_, 0, 0);
+        ISE_ASSERT(h != NULL);
     return (h != 0);
 }
 
@@ -1618,16 +1624,17 @@ void IocpObject::work()
 
     const int IOCP_WAIT_TIMEOUT = 1000*1;  // ms
 
-    while (true)
-    {
-        IocpOverlappedData *overlappedPtr = NULL;
-        DWORD bytesTransferred = 0, nTemp = 0;
-        int errorCode = 0;
-
-        struct AutoFinalizer
+        while (true)
         {
-        private:
-            IocpObject& iocpObject_;
+            IocpOverlappedData *overlappedPtr = NULL;
+            DWORD bytesTransferred = 0;
+            ULONG_PTR  nTemp = 0;
+            int errorCode = 0;
+
+            struct AutoFinalizer
+            {
+            private:
+                IocpObject& iocpObject_;
             IocpOverlappedData*& ovPtr_;
         public:
             AutoFinalizer(IocpObject& iocpObject, IocpOverlappedData*& ovPtr) :
@@ -1815,23 +1822,25 @@ void IocpObject::invokeCallback(const IocpTaskData& taskData)
         callback(taskData);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// class WinTcpEventLoop
+    ///////////////////////////////////////////////////////////////////////////////
+    // class WinTcpEventLoop
 
-WinTcpEventLoop::WinTcpEventLoop()
-{
-    iocpObject_ = new IocpObject();
-}
+    WinTcpEventLoop::WinTcpEventLoop()
+    {
+        iocpObject_ = new IocpObject();
+        _ASSERT(NULL != iocpObject_);
+    }
 
-WinTcpEventLoop::~WinTcpEventLoop()
-{
-    stop(false, true);
-    delete iocpObject_;
-}
+    WinTcpEventLoop::~WinTcpEventLoop()
+    {
+        stop(false, true);
+        if (NULL != iocpObject_)
+            delete iocpObject_;
+    }
 
-//-----------------------------------------------------------------------------
-// 描述: 执行单次事件循环中的工作
-//-----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------
+    // 描述: 执行单次事件循环中的工作
+    //-----------------------------------------------------------------------------
 void WinTcpEventLoop::doLoopWork(Thread *thread)
 {
     iocpObject_->work();
@@ -2447,12 +2456,13 @@ void MainTcpServer::createTcpServerList()
     int serverCount = iseApp().iseOptions().getTcpServerCount();
     ISE_ASSERT(serverCount >= 0);
 
-    tcpServerList_.resize(serverCount);
-    for (int i = 0; i < serverCount; i++)
-    {
-        TcpServer *tcpServer = new TcpServer(iseApp().iseOptions().getTcpServerEventLoopCount(i));
-        tcpServer->setContext(i);
-        tcpServer->setLocalPort(static_cast<WORD>(iseApp().iseOptions().getTcpServerPort(i)));
+        tcpServerList_.resize(serverCount);
+        for (int i = 0; i < serverCount; i++)
+        {
+            TcpServer *tcpServer = new TcpServer(iseApp().iseOptions().getTcpServerEventLoopCount(i));
+            tcpServer->setContext(i);
+            tcpServer->setLocalPort(static_cast<WORD>(iseApp().iseOptions().getTcpServerPort(i)));
+            tcpServer->setLocalAddr(iseApp().iseOptions().getTcpServerAddr(i));
 
         tcpServerList_[i] = tcpServer;
     }

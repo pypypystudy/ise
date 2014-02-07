@@ -222,11 +222,13 @@ public:
     {
         int serverPort;                // TCP服务端口号
         int eventLoopCount;            // 事件循环个数
+        std::string serverAddr;        // TCP服务端地址
 
         TcpServerOption()
         {
             serverPort = DEF_TCP_SERVER_PORT;
             eventLoopCount = DEF_TCP_SERVER_EVENT_LOOP_COUNT;
+            serverAddr = "::";
         }
     };
     typedef std::vector<TcpServerOption> TcpServerOptions;
@@ -255,6 +257,8 @@ public:
 
     // 设置UDP服务端口号
     void setUdpServerPort(int port);
+    // 设置UDP服务器地址
+    void setUpdServerAddr(const std::string& addr);
     // 设置UDP监听线程的数量
     void setUdpListenerThreadCount(int count);
     // 设置UDP请求的组别总数
@@ -276,6 +280,8 @@ public:
     void setTcpServerCount(int count);
     // 设置TCP服务端口号
     void setTcpServerPort(int serverIndex, int port);
+    // 设置TCP服务器地址
+    void setTcpServerAddr(int serverIndex, const std::string& addr);
     void setTcpServerPort(int port) { setTcpServerPort(0, port); }
     // 设置每个TCP服务器中事件循环的个数
     void setTcpServerEventLoopCount(int serverIndex, int eventLoopCount);
@@ -291,6 +297,7 @@ public:
     int getAssistorThreadCount() { return assistorThreadCount_; }
 
     int getUdpServerPort() { return udpServerPort_; }
+    std::string getUdpServerAddr()  { return udpServerAddr_; }
     int getUdpListenerThreadCount() { return udpListenerThreadCount_; }
     int getUdpRequestGroupCount() { return udpRequestGroupCount_; }
     int getUdpRequestQueueCapacity(int groupIndex);
@@ -302,6 +309,7 @@ public:
 
     int getTcpServerCount() { return tcpServerCount_; }
     int getTcpServerPort(int serverIndex);
+    std::string getTcpServerAddr(int serverIndex);
     int getTcpServerEventLoopCount(int serverIndex);
     int getTcpClientEventLoopCount() { return tcpClientEventLoopCount_; }
     int getTcpMaxRecvBufferSize() { return tcpMaxRecvBufferSize_; }
@@ -325,6 +333,8 @@ private:
 
     // UDP服务端口
     int udpServerPort_;
+    // UDP服务器ip地址（为支持ipv4及ipv6）
+    std::string udpServerAddr_;
     // 监听线程的数量
     int udpListenerThreadCount_;
     // 请求组别的数量
@@ -405,6 +415,7 @@ public:
     void finalize();
     void run();
 
+    void setIseBusiness(IseBusiness * business);
     IseOptions& iseOptions() { return iseOptions_; }
     IseBusiness& iseBusiness() { return *iseBusiness_; }
     IseMainServer& mainServer() { return *mainServer_; }
@@ -439,7 +450,6 @@ private:
     void applyIseOptions();
     void createMainServer();
     void deleteMainServer();
-    void createIseBusiness();
     void deleteIseBusiness();
     void initExeName();
     void initDaemon();

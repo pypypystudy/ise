@@ -30,6 +30,7 @@
 #include "ise/main/ise_exceptions.h"
 
 #ifdef ISE_COMPILER_VC
+#include "ws2tcpip.h"
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
@@ -424,7 +425,7 @@ string InetAddress::getDisplayStr() const
 Socket::Socket() :
     isActive_(false),
     handle_(INVALID_SOCKET),
-    domain_(PF_INET),
+    domain_(PF_INET6),
     type_(SOCK_STREAM),
     protocol_(IPPROTO_IP),
     isBlockMode_(true)
@@ -448,16 +449,23 @@ void Socket::open()
     {
         try
         {
-            SOCKET handle;
-            handle = socket(domain_, type_, protocol_);
-            if (handle == INVALID_SOCKET)
-                iseThrowSocketLastError();
-            isActive_ = (handle != INVALID_SOCKET);
-            if (isActive_)
-            {
-                handle_ = handle;
-                setBlockMode(isBlockMode_);
-            }
+//             SOCKET handle;
+//             handle = socket(domain_, type_, protocol_);
+//             if (handle == INVALID_SOCKET)
+//                 iseThrowSocketLastError();
+//             isActive_ = (handle != INVALID_SOCKET);
+//             if (isActive_)
+//             {
+//                 handle_ = handle;
+//                 setBlockMode(isBlockMode_);
+//             }
+// 
+//             // Set the socket options to prevent blocking on the socket and allow re-use of the same 
+            // address when the process is killed and re-started.
+//             struct linger linger;
+//             linger.l_onoff  = 0;
+//             linger.l_linger = 1;
+// 
         }
         catch (SocketException&)
         {
@@ -560,17 +568,48 @@ void Socket::setProtocol(int value)
 //-----------------------------------------------------------------------------
 // 描述: 绑定套接字
 //-----------------------------------------------------------------------------
-void Socket::bind(WORD port)
+void Socket::bind(const char* str_addr, WORD port)
 {
-    SockAddr addr = InetAddress(ntohl(INADDR_ANY), port).getSockAddr();
-    int optVal = 1;
+    //------------------------------------------------------------------------
+    // 判断是哪类ip地址
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(str_addr, std::to_string((long long)port).c_str(), &hints, &res) != 0) {
+        return ;
+    }
+
+    //------------------------------------------------------------------------
+    // 创建套接字
+    SOCKET handle;
+    handle = socket(res->ai_family, res->ai_socktype, protocol_);
+    if (handle == INVALID_SOCKET)
+        iseThrowSocketLastError();
+    isActive_ = (handle != INVALID_SOCKET);
+    if (isActive_)
+    {
+        handle_ = handle;
+        setBlockMode(isBlockMode_);
+    }
+
+    //------------------------------------------------------------------------
+    // Set the socket options to prevent blocking on the socket and allow re-use of the same 
+    // address when the process is killed and re-started.
+    struct linger linger;
+    linger.l_onoff  = 0;
+    linger.l_linger = 1;
+    setsockopt(handle, SOL_SOCKET, SO_LINGER, (char *)&linger, sizeof(linger)) ;
 
     // 强制重新绑定，而不受其它因素的影响
+    int optVal = 1;
     setsockopt(handle_, SOL_SOCKET, SO_REUSEADDR, (char*)&optVal, sizeof(optVal));
 
     // 绑定套接字
-    if (::bind(handle_, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+    if (::bind(handle_, res->ai_addr, res->ai_addrlen) < 0)
         iseThrowSocketLastError();
+
+    freeaddrinfo(res);
 }
 
 //-----------------------------------------------------------------------------
@@ -730,7 +769,7 @@ void BaseUdpServer::open()
             UdpSocket::open();
             if (isActive_)
             {
-                bind(localPort_);
+                bind(localAddr_.c_str(), localPort_);
                 startListenerThreads();
             }
         }
@@ -1439,7 +1478,7 @@ void BaseTcpServer::open()
         if (!isActive())
         {
             socket_.open();
-            socket_.bind(localPort_);
+            socket_.bind(localAddr_.c_str(), localPort_);
             if (listen(socket_.getHandle(), LISTEN_QUEUE_SIZE) < 0)
                 iseThrowSocketLastError();
             startListenerThread();
@@ -1695,7 +1734,7 @@ void TcpListenerThread::execute()
 
     fd_set fds;
     struct timeval tv;
-    SockAddr Addr;
+    sockaddr_storage Addr;
     socklen_t nSockLen = sizeof(Addr);
     SOCKET socketHandle = tcpServer_->getSocket().getHandle();
     InetAddress peerAddr;
@@ -1719,7 +1758,11 @@ void TcpListenerThread::execute()
             acceptHandle = accept(socketHandle, (struct sockaddr*)&Addr, &nSockLen);
             if (acceptHandle != INVALID_SOCKET)
             {
-                peerAddr = InetAddress(ntohl(Addr.sin_addr.s_addr), ntohs(Addr.sin_port));
+                if (Addr.ss_family == AF_INET) 
+                {
+                    sockaddr_in* paddr = (struct sockaddr_in*) &Addr;
+                    peerAddr = InetAddress(ntohl(paddr->sin_addr.s_addr), ntohs(paddr->sin_port));
+                }
                 BaseTcpConnection *connection = tcpServer_->createConnection(acceptHandle);
                 tcpServer_->acceptConnection(connection);
             }
